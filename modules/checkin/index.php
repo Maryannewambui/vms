@@ -69,8 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 UPDATE visits SET
                     visit_status = 'checked_in',
                     actual_check_in = NOW(),
-                    checked_in_by = ?,
-                    checked_in_at = NOW()
+                    checked_in_by = ?
                 WHERE id = ?
             ");
             $stmt->execute([$_SESSION['user_id'], $visitId]);
@@ -99,11 +98,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Create new visitor if not exists
             if (!$visitorId) {
                 $visitorUID = generateUID('VIS-');
-                $stmt = $db->prepare(<<<'SQL'
+                $stmt = $db->prepare("
                     INSERT INTO visitors (visitor_uid, first_name, last_name, email, phone, company, designation, id_type, id_number, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-                SQL
-                );
+                ");
                 $stmt->execute([
                     $visitorUID,
                     $firstName,
@@ -122,16 +120,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $visitUID = generateUID('VISIT-');
             $badgeNumber = generateBadgeNumber();
 
-            $stmt = $db->prepare(<<<'SQL'
+            $stmt = $db->prepare("
                 INSERT INTO visits (
                     visit_uid, visitor_id, category_id, host_user_id, department_id,
                     visit_date, visit_status, actual_check_in, badge_number,
-                    vehicle_plate, people_count, visit_location_type, purpose,
+                    number_plate, people_count, visit_location_type, purpose,
                     safety_induction_acknowledged, nda_acknowledged, terms_acknowledged,
-                    checked_in_by, checked_in_at, created_by, created_at
+                    checked_in_by, created_by, created_at
                 ) VALUES (?, ?, ?, ?, ?, CURDATE(), 'checked_in', NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-            SQL
-            );
+            ");
 
             $stmt->execute([
                 $visitUID,
@@ -140,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (int)$_POST['host_user_id'],
                 (int)($_POST['department_id'] ?? null),
                 $badgeNumber,
-                sanitize($_POST['vehicle_plate'] ?? ''),
+                sanitize($_POST['number_plate'] ?? ''),
                 (int)($_POST['people_count'] ?? 1),
                 sanitize($_POST['visit_location_type'] ?? 'office'),
                 sanitize($_POST['purpose'] ?? ''),
@@ -274,11 +271,9 @@ require_once '../../templates/topnav.php';
 
                 <form method="POST" action="" id="checkin-form" class="space-y-6">
                     <?= csrfField() ?>
-
-
+                    <input type="hidden" name="visitor_id" value="<?= $preRegistered ? sanitize($preRegistered['visitor_id']) : sanitize($_POST['visitor_id'] ?? '') ?>">
                     <?php if ($preRegistered): ?>
                     <input type="hidden" name="visit_id" value="<?= $preRegistered['id'] ?>">
-                    <input type="hidden" name="visitor_id" value="<?= $preRegistered['visitor_id'] ?>">
                     <?php endif; ?>
 
                     <!-- Visitor Information -->
@@ -293,65 +288,74 @@ require_once '../../templates/topnav.php';
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">First Name *</label>
-                                <input type="text" name="first_name" value="<?= $preRegistered ? sanitize($preRegistered['first_name']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                <input type="text" name="first_name" value="<?= $preRegistered ? sanitize($preRegistered['first_name']) : sanitize($_POST['first_name'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Last Name *</label>
-                                <input type="text" name="last_name" value="<?= $preRegistered ? sanitize($preRegistered['last_name']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                <input type="text" name="last_name" value="<?= $preRegistered ? sanitize($preRegistered['last_name']) : sanitize($_POST['last_name'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-2">ID Type *</label>
-                                <select name="id_type" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
-                                    <option value="national_id" <?= $preRegistered && $preRegistered['id_type'] == 'national_id' ? 'selected' : '' ?>>National ID</option>
-                                    <option value="passport" <?= $preRegistered && $preRegistered['id_type'] == 'passport' ? 'selected' : '' ?>>Passport</option>
-                                    <option value="drivers_license" <?= $preRegistered && $preRegistered['id_type'] == 'drivers_license' ? 'selected' : '' ?>>Driver's License</option>
-                                    <option value="work_permit" <?= $preRegistered && $preRegistered['id_type'] == 'work_permit' ? 'selected' : '' ?>>Work Permit</option>
-                                    <option value="other" <?= $preRegistered && $preRegistered['id_type'] == 'other' ? 'selected' : '' ?>>Other</option>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Visitor Type *</label>
+                                <select name="category_id" id="category-select" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                    <?php foreach ($categories as $cat): ?>
+                                    <option value="<?= $cat['id'] ?>" <?= ($preRegistered && $preRegistered['category_id'] == $cat['id']) ? 'selected' : ((isset($_POST['category_id']) && $_POST['category_id'] == $cat['id']) ? 'selected' : '') ?>>
+                                        <?= sanitize($cat['name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
                                 </select>
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-2">ID Number *</label>
-                                <input type="text" name="id_number" value="<?= $preRegistered ? sanitize($preRegistered['id_number']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Company / Organization</label>
+                                <input type="text" name="company" value="<?= $preRegistered ? sanitize($preRegistered['company']) : sanitize($_POST['company'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Email</label>
+                                <input type="email" name="email" value="<?= $preRegistered ? sanitize($preRegistered['email']) : sanitize($_POST['email'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Phone Number *</label>
-                                <input type="tel" name="phone" value="<?= $preRegistered ? sanitize($preRegistered['phone']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                <input type="tel" name="phone" value="<?= $preRegistered ? sanitize($preRegistered['phone']) : sanitize($_POST['phone'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-2">Email Address</label>
-                                <input type="email" name="email" value="<?= $preRegistered ? sanitize($preRegistered['email']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                <label class="block text-sm font-medium text-slate-700 mb-2">ID Type</label>
+                                <select name="id_type" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                    <option value="national_id" <?= $preRegistered && $preRegistered['id_type'] == 'national_id' ? 'selected' : ((isset($_POST['id_type']) && $_POST['id_type'] == 'national_id') ? 'selected' : '') ?>>National ID</option>
+                                    <option value="passport" <?= $preRegistered && $preRegistered['id_type'] == 'passport' ? 'selected' : ((isset($_POST['id_type']) && $_POST['id_type'] == 'passport') ? 'selected' : '') ?>>Passport</option>
+                                    <option value="drivers_license" <?= $preRegistered && $preRegistered['id_type'] == 'drivers_license' ? 'selected' : ((isset($_POST['id_type']) && $_POST['id_type'] == 'drivers_license') ? 'selected' : '') ?>>Driver's License</option>
+                                </select>
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-2">Company / Organization</label>
-                                <input type="text" name="company" value="<?= $preRegistered ? sanitize($preRegistered['company']) : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                <label class="block text-sm font-medium text-slate-700 mb-2">ID Number / Passport *</label>
+                                <input type="text" name="id_number" value="<?= $preRegistered ? sanitize($preRegistered['id_number']) : sanitize($_POST['id_number'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Number Plate</label>
-                                <input type="text" name="vehicle_plate" value="<?= $preRegistered ? sanitize($preRegistered['vehicle_plate'] ?? '') : '' ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="e.g., KAA 123A">
+                                <input type="text" name="number_plate" value="<?= $preRegistered ? sanitize($preRegistered['number_plate'] ?? '') : sanitize($_POST['number_plate'] ?? '') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" placeholder="e.g., ABC-1234">
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-2">Number of People</label>
-                                <input type="number" name="people_count" min="1" value="<?= $preRegistered ? sanitize($preRegistered['people_count'] ?? 1) : 1 ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                                <label class="block text-sm font-medium text-slate-700 mb-2">People Count</label>
+                                <input type="number" min="1" name="people_count" value="<?= $preRegistered ? sanitize($preRegistered['people_count'] ?? '1') : sanitize($_POST['people_count'] ?? '1') ?>" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
                             </div>
 
                             <div class="md:col-span-2">
-                                <label class="block text-sm font-medium text-slate-700 mb-2">Visit Location *</label>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <label class="inline-flex items-center px-4 py-3 border border-slate-300 rounded-lg cursor-pointer">
-                                        <input type="radio" name="visit_location_type" value="office" class="form-radio h-4 w-4 text-primary-600" <?= !$preRegistered || $preRegistered['visit_location_type'] === 'office' ? 'checked' : '' ?>>
-                                        <span class="ml-3 text-slate-700">Office Division</span>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Visit Location Type *</label>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <label class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-3 cursor-pointer">
+                                        <input type="radio" name="visit_location_type" value="office" <?= ($preRegistered && $preRegistered['visit_location_type'] == 'office') || (!isset($_POST['visit_location_type']) || $_POST['visit_location_type'] === 'office') ? 'checked' : '' ?> class="mr-2" required>
+                                        Office
                                     </label>
-                                    <label class="inline-flex items-center px-4 py-3 border border-slate-300 rounded-lg cursor-pointer">
-                                        <input type="radio" name="visit_location_type" value="retail" class="form-radio h-4 w-4 text-primary-600" <?= $preRegistered && $preRegistered['visit_location_type'] === 'retail' ? 'checked' : '' ?>>
-                                        <span class="ml-3 text-slate-700">Retail Store</span>
+                                    <label class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-3 cursor-pointer">
+                                        <input type="radio" name="visit_location_type" value="retail" <?= ($preRegistered && $preRegistered['visit_location_type'] == 'retail') || (isset($_POST['visit_location_type']) && $_POST['visit_location_type'] === 'retail') ? 'checked' : '' ?> class="mr-2">
+                                        Retail
                                     </label>
                                 </div>
                             </div>
@@ -359,10 +363,21 @@ require_once '../../templates/topnav.php';
                             <div class="md:col-span-2">
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Purpose of Visit *</label>
                                 <select name="purpose" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
-                                    <?php $purposeOptions = ['Meeting', 'Interview', 'Audit', 'Training', 'Maintenance', 'Delivery', 'Material Delivery', 'Retail Purchase', 'Inspection', 'Other']; ?>
-                                    <?php foreach ($purposeOptions as $option): ?>
-                                    <option value="<?= sanitize($option) ?>" <?= ($preRegistered && $preRegistered['purpose'] === $option) ? 'selected' : '' ?>>
-                                        <?= sanitize($option) ?>
+                                    <?php
+                                    $purposeOptions = [
+                                        'Meeting' => 'Meeting',
+                                        'Delivery' => 'Delivery',
+                                        'Audit' => 'Audit',
+                                        'Training' => 'Training',
+                                        'Maintenance' => 'Maintenance',
+                                        'Material Delivery' => 'Material Delivery',
+                                        'Other' => 'Other'
+                                    ];
+                                    $selectedPurpose = $preRegistered ? $preRegistered['purpose'] : ($_POST['purpose'] ?? '');
+                                    ?>
+                                    <?php foreach ($purposeOptions as $value => $label): ?>
+                                    <option value="<?= sanitize($value) ?>" <?= $selectedPurpose === $value ? 'selected' : '' ?>>
+                                        <?= sanitize($label) ?>
                                     </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -404,46 +419,30 @@ require_once '../../templates/topnav.php';
                         </div>
                     </div>
 
-                    <!-- Photo & Safety -->
+                    <!-- Acknowledgments -->
                     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
                         <h2 class="text-lg font-semibold text-slate-800 mb-4 flex items-center">
                             <svg class="w-5 h-5 mr-2 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                             </svg>
-                            Photo & Safety Acknowledgment
+                            Acknowledgments
                         </h2>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="space-y-4 md:col-span-2">
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-2">Safety Clearance Level</label>
-                                    <select name="safety_level" id="safety-level" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                                        <option value="1">Low - General Area</option>
-                                        <option value="2" <?= ($preRegistered && $preRegistered['safety_clearance_level'] == 2) ? 'selected' : '' ?>>Medium - Production Areas</option>
-                                        <option value="3" <?= ($preRegistered && $preRegistered['safety_clearance_level'] == 3) ? 'selected' : '' ?>>High - Restricted Areas</option>
-                                        <option value="4" <?= ($preRegistered && $preRegistered['safety_clearance_level'] == 4) ? 'selected' : '' ?>>Critical - Hazardous Areas</option>
-                                    </select>
-                                </div>
+                        <div class="space-y-4">
+                            <label class="inline-flex items-center gap-3">
+                                <input type="checkbox" name="safety_acknowledge" value="1" <?= isset($_POST['safety_acknowledge']) ? 'checked' : '' ?> class="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" required>
+                                <span class="text-sm text-slate-700">I acknowledge the safety rules and induction for this visit.</span>
+                            </label>
 
-                                <div class="space-y-2">
-                                    <label class="flex items-start">
-                                        <input type="checkbox" name="safety_acknowledge" class="mt-1 w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500" required>
-                                        <span class="ml-2 text-sm text-slate-600">Safety induction acknowledged</span>
-                                    </label>
+                            <label class="inline-flex items-center gap-3">
+                                <input type="checkbox" name="terms_acknowledge" value="1" <?= isset($_POST['terms_acknowledge']) ? 'checked' : '' ?> class="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" required>
+                                <span class="text-sm text-slate-700">I agree to comply with visitor terms and campus policies.</span>
+                            </label>
 
-                                    <label class="flex items-start">
-                                        <input type="checkbox" name="terms_acknowledge" class="mt-1 w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500" required>
-                                        <span class="ml-2 text-sm text-slate-600">Terms and conditions accepted</span>
-                                    </label>
-
-                                    <?php if (($preRegistered && $preRegistered['requires_nda']) || (!$preRegistered && false)): ?>
-                                    <label class="flex items-start">
-                                        <input type="checkbox" name="nda_acknowledge" class="mt-1 w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500">
-                                        <span class="ml-2 text-sm text-slate-600">NDA signed</span>
-                                    </label>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
+                            <label class="inline-flex items-center gap-3">
+                                <input type="checkbox" name="nda_acknowledge" value="1" <?= isset($_POST['nda_acknowledge']) ? 'checked' : '' ?> class="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500">
+                                <span class="text-sm text-slate-700">I agree to the non-disclosure and confidentiality requirements.</span>
+                            </label>
                         </div>
                     </div>
 
@@ -571,7 +570,10 @@ function fillVisitorInfo(visitor) {
     document.querySelector('[name="email"]').value = visitor.email || '';
     document.querySelector('[name="phone"]').value = visitor.phone || '';
     document.querySelector('[name="company"]').value = visitor.company || '';
-    document.querySelector('[name="visitor_id"]').value = visitor.id;
+    const visitorIdInput = document.querySelector('[name="visitor_id"]');
+    if (visitorIdInput) {
+        visitorIdInput.value = visitor.id;
+    }
 }
 
 // Filter users by department

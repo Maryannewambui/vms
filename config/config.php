@@ -1,17 +1,11 @@
 <?php
-/**
- * Application Configuration
- * VMS - Pipe Manufacturing Company
- */
 
-// (Session will be started after loading config/constants below)
-
-// Error reporting (disable in production)
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // Include required files
 require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 

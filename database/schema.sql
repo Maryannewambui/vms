@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS visitor_categories (
 -- ============================================
 CREATE TABLE IF NOT EXISTS visitors (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    visitor_uid VARCHAR(30) UNIQUE,
+    visitor_uid VARCHAR(30) UNIQUE NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     email VARCHAR(100),
@@ -121,11 +121,13 @@ CREATE TABLE IF NOT EXISTS visitors (
     nda_signed_date TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by INT,
     INDEX idx_email (email),
     INDEX idx_phone (phone),
     INDEX idx_id_number (id_number),
-    INDEX idx_company (company)
-) ENGINE=InnoDB;
+    INDEX idx_company (company),
+    INDEX idx_visitor_uid (visitor_uid)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- MEETINGS TABLE
@@ -181,15 +183,12 @@ CREATE TABLE IF NOT EXISTS meeting_visitors (
 -- ============================================
 CREATE TABLE IF NOT EXISTS visits (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    visit_uid VARCHAR(30) UNIQUE,
+    visit_uid VARCHAR(30) UNIQUE NOT NULL,
     visitor_id INT NOT NULL,
     meeting_id INT,
     category_id INT NOT NULL,
     host_user_id INT NOT NULL,
     department_id INT,
-    visit_location_type ENUM('office', 'retail') DEFAULT 'office',
-    vehicle_plate VARCHAR(50),
-    people_count INT DEFAULT 1,
     visit_date DATE NOT NULL,
     visit_status ENUM('pre_registered', 'approved', 'checked_in', 'checked_out', 'cancelled', 'overdue', 'no_show') DEFAULT 'pre_registered',
     scheduled_arrival_time TIME,
@@ -197,6 +196,9 @@ CREATE TABLE IF NOT EXISTS visits (
     actual_check_in TIMESTAMP NULL,
     actual_check_out TIMESTAMP NULL,
     badge_number VARCHAR(30),
+    number_plate VARCHAR(50),
+    people_count INT DEFAULT 1,
+    visit_location_type ENUM('office', 'retail', 'delivery', 'meeting', 'audit', 'training', 'maintenance') DEFAULT 'office',
     badge_printed BOOLEAN DEFAULT FALSE,
     badge_printed_at TIMESTAMP NULL,
     badge_returned BOOLEAN DEFAULT FALSE,
@@ -213,9 +215,6 @@ CREATE TABLE IF NOT EXISTS visits (
     terms_acknowledged_at TIMESTAMP NULL,
     photo_taken VARCHAR(255),
     signature VARCHAR(255),
-    emergency_contact_name VARCHAR(100),
-    emergency_contact_phone VARCHAR(20),
-    emergency_contact_relation VARCHAR(50),
     notes TEXT,
     security_notes TEXT,
     approved_by INT,
@@ -227,16 +226,23 @@ CREATE TABLE IF NOT EXISTS visits (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by INT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (visitor_id) REFERENCES visitors(id),
-    FOREIGN KEY (meeting_id) REFERENCES meetings(id),
+    updated_by INT,
+    FOREIGN KEY (visitor_id) REFERENCES visitors(id) ON DELETE CASCADE,
+    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE SET NULL,
     FOREIGN KEY (category_id) REFERENCES visitor_categories(id),
     FOREIGN KEY (host_user_id) REFERENCES users(id),
     FOREIGN KEY (department_id) REFERENCES departments(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (checked_in_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (checked_out_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_visit_date (visit_date),
     INDEX idx_visitor_id (visitor_id),
     INDEX idx_status (visit_status),
-    INDEX idx_badge_number (badge_number)
-) ENGINE=InnoDB;
+    INDEX idx_badge_number (badge_number),
+    INDEX idx_visit_uid (visit_uid),
+    INDEX idx_host_user_id (host_user_id),
+    INDEX idx_department_id (department_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- VEHICLES TABLE
