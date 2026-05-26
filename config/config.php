@@ -9,6 +9,11 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 
+// Include mailer configuration if Composer is installed
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/mailer.php';
+}
+
 // Start session (after loading constants)
 if (session_status() === PHP_SESSION_NONE) {
     if (defined('SESSION_NAME')) {
@@ -27,7 +32,7 @@ if (empty($_SESSION[CSRF_TOKEN_NAME])) {
  */
 
 // User Roles
-define('ROLE_SUPER_ADMIN', 1);
+define('ROLE_IT_ADMIN', 1);
 define('ROLE_RECEPTIONIST', 2);
 define('ROLE_SECURITY', 3);
 define('ROLE_HR_OFFICER', 4);
@@ -65,7 +70,7 @@ define('SAFETY_CRITICAL', 4);
  */
 function getRoleName($roleId) {
     $roles = [
-        ROLE_SUPER_ADMIN => 'Super Admin',
+        ROLE_IT_ADMIN => 'IT Admin',
         ROLE_RECEPTIONIST => 'Receptionist',
         ROLE_SECURITY => 'Security Guard',
         ROLE_HR_OFFICER => 'HR Officer',

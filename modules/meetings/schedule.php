@@ -61,13 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $meetingData['meeting_uid'] = generateUID('MTG-');
 
         // Insert meeting
-                $stmt = $db->prepare("\
-                    INSERT INTO visitors (visitor_uid, first_name, last_name, email, phone, company, designation, id_type, id_number, created_at)\
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())\
-                ");
-                safety_clearance_level, requires_nda, requires_safety_induction,
-                restricted_areas, internal_participants, notes, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        $stmt = $db->prepare("\
+            INSERT INTO meetings (
+                meeting_uid, title, purpose, description, host_user_id,
+                department_id, location, meeting_date, start_time, end_time,
+                expected_duration, safety_clearance_level, requires_nda,
+                requires_safety_induction, restricted_areas, internal_participants,
+                notes, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())\
         ");
 
         $stmt->execute([
@@ -130,17 +131,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     INSERT INTO visitors (visitor_uid, first_name, last_name, email, phone, company, id_type, id_number, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
                 ");
-                    $stmt->execute([
-                        $visitorUID,
-                        $firstName,
-                        $lastName,
-                        $email,
-                        $phone,
-                        sanitize($visitorCompanies[$index] ?? ''),
-                        sanitize($_POST['designation'] ?? ''),
-                        sanitize($visitorIdTypes[$index] ?? 'national_id'),
-                        sanitize($visitorIdNumbers[$index] ?? '')
-                    ]);
+                $stmt->execute([
+                    $visitorUID,
+                    $firstName,
+                    $lastName,
+                    $email,
+                    $phone,
+                    sanitize($visitorCompanies[$index] ?? ''),
+                    sanitize($visitorIdTypes[$index] ?? 'national_id'),
+                    sanitize($visitorIdNumbers[$index] ?? '')
+                ]);
                 $visitorId = $db->lastInsertId();
             }
 
@@ -149,29 +149,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $categoryId = (int)($visitorCategoriesArr[$index] ?? 1);
 
             // Check if approval is required for this category
-            $stmt = $db->prepare("SELECT requires_approval, requires_nda, requires_safety_induction FROM visitor_categories WHERE id = ?");
+            $stmt = $db->prepare("SELECT requires_approval FROM visitor_categories WHERE id = ?");
             $stmt->execute([$categoryId]);
             $categoryInfo = $stmt->fetch();
 
             $visitStatus = 'pre_registered';
-            if ($categoryInfo && $categoryInfo['requires_approval']) {
-                // Create approval request
-                $visitStatus = 'pending_approval';
-
-                $stmt = $db->prepare("
-                    INSERT INTO approvals (visit_id, request_type, requested_by, status, requested_at)
-                    VALUES (?, 'visit', ?, 'pending', NOW())
-                ");
-                // Will update visit_id after insert
-            }
 
             $stmt = $db->prepare("
                 INSERT INTO visits (
                     visit_uid, visitor_id, meeting_id, category_id, host_user_id, department_id,
                     visit_date, scheduled_arrival_time, scheduled_departure_time, visit_status,
-                    safety_clearance_level, nda_acknowledged, safety_induction_acknowledged,
-                    purpose, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    safety_clearance_level, purpose, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
 
             $stmt->execute([
@@ -186,12 +175,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $meetingData['end_time'],
                 $visitStatus,
                 $meetingData['safety_clearance_level'],
-                $meetingData['requires_nda'] ? 0 : 1,
-                $meetingData['requires_safety_induction'] ? 0 : 1,
-                $meetingData['purpose']
+                $meetingData['purpose'],
+                $_SESSION['user_id']
             ]);
 
             $visitId = $db->lastInsertId();
+
+            // Create approval request if required for this category
+            $stmt = $db->prepare("SELECT requires_approval FROM visitor_categories WHERE id = ?");
+            $stmt->execute([$categoryId]);
+            $categoryInfo = $stmt->fetch();
+            
+            if ($categoryInfo && $categoryInfo['requires_approval']) {
+                $stmt = $db->prepare("
+                    INSERT INTO approvals (visit_id, request_type, requested_by, status, requested_at, priority)
+                    VALUES (?, 'visit', ?, 'pending', NOW(), 'normal')
+                ");
+                $stmt->execute([$visitId, $_SESSION['user_id']]);
+            }
 
             // Create meeting_visitors entry
             $qrCode = generateQRData($visitId);
@@ -231,6 +232,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Notify host
             if ($meetingData['host_user_id'] != $_SESSION['user_id']) {
+                // Get host information
+                $stmt = $db->prepare("
+                    SELECT first_name, last_name, email
+                    FROM users
+                    WHERE id = ?
+                ");
+                $stmt->execute([$meetingData['host_user_id']]);
+                $host = $stmt->fetch();
+                
+                // Send in-app notification
                 sendNotification(
                     $meetingData['host_user_id'],
                     'meeting_reminder',
@@ -238,6 +249,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "A meeting has been scheduled for {$meetingData['meeting_date']} with {$name}",
                     "/modules/meetings/view.php?id={$meetingId}"
                 );
+                
+                // Send email if PHP Mailer is configured
+                if (function_exists('getEmailTemplate')) {
+                    try {
+                        $emailData = [
+                            'hostName' => $host['first_name'] . ' ' . $host['last_name'],
+                            'visitorName' => $name,
+                            'visitorCompany' => sanitize($_POST['visitor_company'][0] ?? 'Not specified'),
+                            'visitorEmail' => sanitize($_POST['visitor_email'][0] ?? 'Not provided'),
+                            'visitorPhone' => sanitize($_POST['visitor_phone'][0] ?? 'Not provided'),
+                            'meetingDate' => formatDate($meetingData['meeting_date']),
+                            'meetingTime' => formatTime($meetingData['start_time']),
+                            'meetingLocation' => sanitize($meetingData['location']),
+                            'meetingPurpose' => sanitize($meetingData['purpose']),
+                            'confirmLink' => APP_URL . '/modules/meetings/view.php?id=' . $meetingId,
+                            'requiresApproval' => false
+                        ];
+                        
+                        $htmlBody = getEmailTemplate('meeting-invitation', $emailData);
+                        
+                        if ($htmlBody) {
+                            sendEmail(
+                                $host['email'],
+                                'Meeting Scheduled - ' . $meetingData['title'],
+                                $htmlBody
+                            );
+                        }
+                    } catch (Exception $emailError) {
+                        error_log("Failed to send meeting email: " . $emailError->getMessage());
+                        // Continue even if email fails - notification is sent
+                    }
+                }
             }
         }
 

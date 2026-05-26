@@ -88,13 +88,10 @@ $rememberEmail = $_COOKIE['remember_email'] ?? '';
     <div class="hidden lg:flex lg:flex-1 gradient-bg pattern items-center justify-center">
         <div class="max-w-md text-center text-white p-8">
             <div class="mb-8">
-                <svg class="w-24 h-24 mx-auto opacity-90" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                </svg>
+                <img
             </div>
-            <h1 class="text-4xl font-bold mb-4">PipeVMS</h1>
+            <h1 class="text-4xl font-bold mb-4">DANCO GUESTS</h1>
             <p class="text-lg opacity-90 mb-6">Visitor Management System</p>
-            <p class="text-sm opacity-75">Precision Pipe Manufacturing Co.</p>
 
             <div class="mt-12 grid grid-cols-3 gap-6">
                 <div class="text-center">

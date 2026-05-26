@@ -25,15 +25,17 @@ if ($visitId) {
                d.name as department_name, vp.pass_number, vp.qr_code
         FROM visits v
         JOIN visitors vis ON v.visitor_id = vis.id
-        JOIN visitor_categories vc ON v.category_id = vc.id
-        JOIN users u ON v.host_user_id = u.id
+        LEFT JOIN visitor_categories vc ON v.category_id = vc.id
+        LEFT JOIN users u ON v.host_user_id = u.id
         LEFT JOIN departments d ON v.department_id = d.id
         LEFT JOIN visitor_passes vp ON vp.visit_id = v.id
         WHERE v.id = ?
     ");
     $stmt->execute([$visitId]);
     $visit = $stmt->fetch();
-}
+    if (!$visit) {
+        $error = 'Selected visit could not be found or may already be checked out.';
+    }}
 
 // Handle check-out
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $visit) {
@@ -42,11 +44,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $visit) {
     try {
         $db->beginTransaction();
 
+        // Calculate duration
+        $actualCheckIn = new DateTime($visit['actual_check_in']);
+        $actualCheckOut = new DateTime();
+        $duration = $actualCheckIn->diff($actualCheckOut);
+        $durationMinutes = ($duration->days * 24 * 60) + ($duration->h * 60) + $duration->i;
+        $durationStr = $duration->format('%h hours %i minutes');
+
         // Update visit record
         $stmt = $db->prepare("
             UPDATE visits SET
                 visit_status = 'checked_out',
                 actual_check_out = NOW(),
+                duration_minutes = ?,
                 checked_out_by = ?,
                 badge_returned = ?,
                 badge_returned_at = CASE WHEN ? = 1 THEN NOW() ELSE NULL END,
@@ -56,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $visit) {
             WHERE id = ?
         ");
         $stmt->execute([
+            $durationMinutes,
             $_SESSION['user_id'],
             isset($_POST['badge_returned']) ? 1 : 0,
             isset($_POST['badge_returned']) ? 1 : 0,
@@ -65,26 +76,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $visit) {
             $visitId
         ]);
 
-        // Update visitor pass
-        $stmt = $db->prepare("UPDATE visitor_passes SET is_active = 0 WHERE visit_id = ?");
+        // Create checkout record for audit trail
+        $checkoutUID = generateUID('CHECKOUT-');
+        $stmt = $db->prepare("
+            INSERT INTO checkout_records (
+                visit_id, checkout_uid, visitor_id, checked_out_by,
+                check_in_time, check_out_time, duration_minutes,
+                badge_returned, badge_returned_at, security_notes,
+                visit_rating, visit_feedback, additional_notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, NOW())
+        ");
+        $stmt->execute([
+            $visitId,
+            $checkoutUID,
+            $visit['visitor_id'],
+            $_SESSION['user_id'],
+            $visit['actual_check_in'],
+            $durationMinutes,
+            isset($_POST['badge_returned']) ? 1 : 0,
+            isset($_POST['badge_returned']) ? date('Y-m-d H:i:s') : null,
+            sanitize($_POST['notes'] ?? ''),
+            (int)($_POST['rating'] ?? 0),
+            sanitize($_POST['feedback'] ?? ''),
+            sanitize($_POST['notes'] ?? '')
+        ]);
+
+        // Update visitor pass - deactivate
+        $stmt = $db->prepare("
+            UPDATE visitor_passes SET
+                is_active = 0
+            WHERE visit_id = ?
+        ");
         $stmt->execute([$visitId]);
 
-        // Calculate duration
-        $actualCheckIn = new DateTime($visit['actual_check_in']);
-        $actualCheckOut = new DateTime();
-        $duration = $actualCheckIn->diff($actualCheckOut);
-        $durationStr = $duration->format('%h hours %i minutes');
+        // Send notification to host
+        sendNotification(
+            $visit['host_user_id'],
+            'visitor_checkout',
+            'Visitor Checked Out',
+            sanitize($visit['first_name'] . ' ' . $visit['last_name']) . ' has checked out. Duration: ' . $durationStr,
+            'modules/checkout/index.php'
+        );
 
         $db->commit();
-        logActivity('CHECK_OUT', "Visitor checked out - Duration: $durationStr", $_SESSION['user_id']);
+        logActivity('VISITOR_CHECKOUT', "Visitor {$visit['first_name']} {$visit['last_name']} checked out - Duration: {$durationStr}", $_SESSION['user_id']);
 
-        $_SESSION['success'] = "Visitor checked out successfully. Duration: $durationStr";
-        header('Location: ./index.php');
+        $_SESSION['checkout_success'] = true;
+        $_SESSION['checkout_data'] = [
+            'visitor_name' => sanitize($visit['first_name'] . ' ' . $visit['last_name']),
+            'company' => sanitize($visit['company']),
+            'duration' => $durationStr,
+            'badge_returned' => isset($_POST['badge_returned']) ? 'Yes' : 'No',
+            'rating' => (int)($_POST['rating'] ?? 0)
+        ];
+        header('Location: ./index.php?checkout_success=1');
         exit();
 
     } catch (Exception $e) {
         $db->rollBack();
         $error = 'Check-out failed: ' . $e->getMessage();
+        logActivity('CHECKOUT_ERROR', "Checkout failed: " . $e->getMessage(), $_SESSION['user_id']);
     }
 }
 
@@ -127,6 +178,52 @@ require_once '../../templates/topnav.php';
             <?php unset($_SESSION['success']); ?>
         </div>
         <?php endif; ?>
+
+        <!-- Checkout Success Message -->
+        <?php if (isset($_GET['checkout_success']) && isset($_SESSION['checkout_data'])): ?>
+        <div class="mb-6 p-6 bg-green-50 border-2 border-green-200 rounded-xl shadow-sm">
+            <div class="flex items-center mb-4">
+                <svg class="w-6 h-6 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <h3 class="text-lg font-semibold text-green-800">Visitor Checked Out Successfully</h3>
+            </div>
+            <?php $data = $_SESSION['checkout_data']; ?>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-lg">
+                <div>
+                    <p class="text-xs text-slate-500 uppercase">Visitor Name</p>
+                    <p class="font-semibold text-slate-800"><?= $data['visitor_name'] ?></p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500 uppercase">Company</p>
+                    <p class="font-semibold text-slate-800"><?= $data['company'] ?></p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500 uppercase">Duration</p>
+                    <p class="font-semibold text-green-600"><?= $data['duration'] ?></p>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-500 uppercase">Badge Returned</p>
+                    <p class="font-semibold text-slate-800"><?= $data['badge_returned'] ?></p>
+                </div>
+            </div>
+            <?php if ($data['rating'] > 0): ?>
+            <div class="mt-4 flex items-center">
+                <p class="text-sm text-slate-600 mr-3">Visitor Rating:</p>
+                <div class="flex space-x-1">
+                    <?php for ($i = 0; $i < $data['rating']; $i++): ?>
+                    <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                    <?php endfor; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+            <button onclick="window.location='?'" class="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                Check Out Another Visitor
+            </button>
+        </div>
+        <?php unset($_SESSION['checkout_data']); endif; ?>
 
         <?php if ($error): ?>
         <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
@@ -269,7 +366,7 @@ require_once '../../templates/topnav.php';
                                     </div>
                                 </div>
                             </div>
-                            <a href="?id=<?= $visitor['id'] ?>" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-medium">
+                            <a href="./index.php?id=<?= $visitor['id'] ?>" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-medium">
                                 Check Out
                             </a>
                         </div>
