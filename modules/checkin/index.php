@@ -398,6 +398,7 @@ require_once '../../templates/topnav.php';
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Department *</label>
                                 <select name="department_id" id="dept-select" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                    <option value="">-- Select Department --</option>
                                     <?php foreach ($departments as $dept): ?>
                                     <option value="<?= $dept['id'] ?>" <?= ($preRegistered && $preRegistered['department_id'] == $dept['id']) ? 'selected' : '' ?>>
                                         <?= sanitize($dept['name']) ?>
@@ -409,6 +410,7 @@ require_once '../../templates/topnav.php';
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">Host (Person to Visit) *</label>
                                 <select name="host_user_id" id="host-select" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500" required>
+                                    <option value="">-- Select Host --</option>
                                     <?php foreach ($users as $user): ?>
                                     <option value="<?= $user['id'] ?>" data-dept="<?= $user['department_id'] ?>" <?= ($preRegistered && $preRegistered['host_user_id'] == $user['id']) ? 'selected' : '' ?>>
                                         <?= sanitize($user['first_name'] . ' ' . $user['last_name']) ?>

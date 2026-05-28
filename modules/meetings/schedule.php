@@ -29,6 +29,7 @@ $categories = $stmt->fetchAll();
 // Handle form submission
 $message = '';
 $error = '';
+$emailSent = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCSRF();
@@ -61,15 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $meetingData['meeting_uid'] = generateUID('MTG-');
 
         // Insert meeting
-        $stmt = $db->prepare("\
-            INSERT INTO meetings (
+        $sql = "INSERT INTO meetings (
                 meeting_uid, title, purpose, description, host_user_id,
                 department_id, location, meeting_date, start_time, end_time,
                 expected_duration, safety_clearance_level, requires_nda,
                 requires_safety_induction, restricted_areas, internal_participants,
                 notes, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())\
-        ");
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+
+        $stmt = $db->prepare($sql);
 
         $stmt->execute([
             $meetingData['meeting_uid'],
@@ -180,9 +181,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
             $visitId = $db->lastInsertId();
+            $passNumber = generateUID('PASS-');
 
             // Create approval request if required for this category
-            $stmt = $db->prepare("SELECT requires_approval FROM visitor_categories WHERE id = ?");
+            $stmt = $db->prepare("SELECT requires_approval, name FROM visitor_categories WHERE id = ?");
             $stmt->execute([$categoryId]);
             $categoryInfo = $stmt->fetch();
             
@@ -192,7 +194,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, 'visit', ?, 'pending', NOW(), 'normal')
                 ");
                 $stmt->execute([$visitId, $_SESSION['user_id']]);
+                
+                // Send approval request email to host
+                $hostStmt = $db->prepare("SELECT first_name, last_name, email FROM users WHERE id = ?");
+                $hostStmt->execute([$meetingData['host_user_id']]);
+                $hostInfo = $hostStmt->fetch();
+                
+                if ($hostInfo && function_exists('sendEmail')) {
+                    try {
+                        $approvalData = [
+                            'hostName' => $hostInfo['first_name'] . ' ' . $hostInfo['last_name'],
+                            'visitorName' => $name,
+                            'visitorCompany' => sanitize($_POST['visitor_company'][$index] ?? 'Not specified'),
+                            'visitorEmail' => $email,
+                            'visitorPhone' => $phone,
+                            'passNumber' => $passNumber,
+                            'expectedArrival' => formatDate($meetingData['meeting_date']) . ' at ' . formatTime($meetingData['start_time']),
+                            'purpose' => sanitize($meetingData['purpose']),
+                            'visitorCategory' => $categoryInfo['name'] ?? 'Visitor',
+                            'approveLink' => APP_URL . '/modules/approvals/index.php',
+                            'rejectLink' => APP_URL . '/modules/approvals/index.php'
+                        ];
+                        
+                        $htmlBody = getEmailTemplate('approval-request', $approvalData);
+                        
+                        if ($htmlBody) {
+                            $emailResult = sendEmail(
+                                $hostInfo['email'],
+                                'Visitor Pass Approval Required - ' . $meetingData['title'],
+                                $htmlBody
+                            );
+                            if (!empty($emailResult['success'])) {
+                                $emailSent = true;
+                            } else {
+                                error_log("Approval email not sent: " . ($emailResult['message'] ?? 'unknown error'));
+                            }
+                        }
+                    } catch (Exception $emailError) {
+                        error_log("Failed to send approval request email: " . $emailError->getMessage());
+                    }
+                }
             }
+
+            // Create visitor_passes record
+            $stmt = $db->prepare("
+                INSERT INTO visitor_passes (visit_id, pass_number, pass_type, issued_by, valid_from, valid_until, is_active)
+                VALUES (?, ?, 'temporary', ?, ?, ?, 1)
+            ");
+            $stmt->execute([
+                $visitId,
+                $passNumber,
+                $_SESSION['user_id'],
+                $meetingData['meeting_date'],
+                $meetingData['meeting_date'] . ' ' . $meetingData['end_time']
+            ]);
 
             // Create meeting_visitors entry
             $qrCode = generateQRData($visitId);
@@ -251,14 +306,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 
                 // Send email if PHP Mailer is configured
-                if (function_exists('getEmailTemplate')) {
+                if (function_exists('sendEmail')) {
                     try {
                         $emailData = [
                             'hostName' => $host['first_name'] . ' ' . $host['last_name'],
                             'visitorName' => $name,
-                            'visitorCompany' => sanitize($_POST['visitor_company'][0] ?? 'Not specified'),
-                            'visitorEmail' => sanitize($_POST['visitor_email'][0] ?? 'Not provided'),
-                            'visitorPhone' => sanitize($_POST['visitor_phone'][0] ?? 'Not provided'),
+                            'visitorCompany' => sanitize($visitorCompanies[$index] ?? 'Not specified'),
+                            'visitorEmail' => $email,
+                            'visitorPhone' => $phone,
                             'meetingDate' => formatDate($meetingData['meeting_date']),
                             'meetingTime' => formatTime($meetingData['start_time']),
                             'meetingLocation' => sanitize($meetingData['location']),
@@ -270,11 +325,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $htmlBody = getEmailTemplate('meeting-invitation', $emailData);
                         
                         if ($htmlBody) {
-                            sendEmail(
+                            $emailResult = sendEmail(
                                 $host['email'],
                                 'Meeting Scheduled - ' . $meetingData['title'],
                                 $htmlBody
                             );
+                            if (!empty($emailResult['success'])) {
+                                $emailSent = true;
+                            } else {
+                                error_log("Meeting invitation email not sent: " . ($emailResult['message'] ?? 'unknown error'));
+                            }
                         }
                     } catch (Exception $emailError) {
                         error_log("Failed to send meeting email: " . $emailError->getMessage());
@@ -288,6 +348,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         logActivity('CREATE_MEETING', "Created meeting ID: $meetingId");
 
         $_SESSION['success'] = 'Meeting scheduled successfully! Visitors have been pre-registered.';
+        if ($emailSent) {
+            $_SESSION['success'] .= ' Host notification email has been sent.';
+        } else {
+            $_SESSION['success'] .= ' Host notification email may not have been delivered.';
+        }
         header('Location: view.php?id=' . $meetingId);
         exit();
 

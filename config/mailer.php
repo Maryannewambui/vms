@@ -1,16 +1,10 @@
 <?php
-/**
- * PHP Mailer Configuration
- * VMS - Pipe Manufacturing Company
- * 
- * Configure your Office 365/Outlook SMTP credentials here
- */
 
 // Email Configuration Constants
 define('MAIL_HOST', 'dancoplastics.com');
 define('MAIL_PORT', 465);
 define('MAIL_SECURE', 'ssl');
-define('MAIL_USERNAME', 'visitors@danco-plastics.com');      // Change to your Office 365 email
+define('MAIL_USERNAME', 'visitors@dancoplastics.com');      // Change to your Office 365 email
 define('MAIL_PASSWORD', 'Saniflex@123');                 // Change to your Office 365 password
 define('MAIL_FROM_EMAIL', 'visitors@dancoplastics.com');            // Company email address
 define('MAIL_FROM_NAME', 'DANCO PLASTICS - VMS');               // Display name

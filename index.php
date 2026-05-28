@@ -254,7 +254,7 @@ require_once '../vms/templates/topnav.php';
                 </div>
             </a>
 
-            <a href="modules/admin/approvals.php" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 hover:shadow-md transition-shadow cursor-pointer">
+            <a href="modules/approvals/index.php" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 hover:shadow-md transition-shadow cursor-pointer">
                 <div class="flex items-center">
                     <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center mr-4">
                         <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

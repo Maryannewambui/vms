@@ -210,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get pending approvals
 $stmt = $db->prepare("
-    SELECT a.id, a.created_at as requested_at, a.request_type,
+    SELECT a.id, a.requested_at, a.request_type,
            v.visit_uid, v.actual_check_in,
            vis.first_name, vis.last_name, vis.company, vis.email,
            u.first_name as host_name, u.last_name as host_last,
@@ -222,7 +222,7 @@ $stmt = $db->prepare("
     LEFT JOIN visitor_passes vp ON vp.visit_id = v.id
     WHERE a.status = 'pending'
     AND (u.id = ? OR ? = 1)
-    ORDER BY a.created_at DESC
+    ORDER BY a.requested_at DESC
 ");
 
 $isAdmin = hasPermission('approve_visitor_pass');
